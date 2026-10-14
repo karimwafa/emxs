@@ -479,6 +479,16 @@ chown -R "$WEB_USER:$WEB_GROUP" /var/www/roundcube
 chmod -R 755 /var/www/roundcube
 chmod -R 777 /var/www/roundcube/temp /var/www/roundcube/logs
 
+# Tune PHP upload limits for Roundcube (50MB attachments)
+find /etc/php/ -name php.ini 2>/dev/null | while read -r ini; do
+    sed -i 's/^upload_max_filesize = .*/upload_max_filesize = 50M/' "$ini"
+    sed -i 's/^post_max_size = .*/post_max_size = 50M/' "$ini"
+done
+if [ -f /etc/php.ini ]; then
+    sed -i 's/^upload_max_filesize = .*/upload_max_filesize = 50M/' /etc/php.ini
+    sed -i 's/^post_max_size = .*/post_max_size = 50M/' /etc/php.ini
+fi
+
 # Nginx Internal Roundcube Listener on Port 8088
 mkdir -p /etc/nginx/conf.d /etc/nginx/sites-available /etc/nginx/sites-enabled
 sed -e "s|{{PHP_FPM_SOCK}}|$PHP_FPM_SOCK|g" \

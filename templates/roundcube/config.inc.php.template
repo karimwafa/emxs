@@ -31,3 +31,4 @@ $config['skin'] = 'elastic';
 $config['auto_create_user'] = true;
 $config['mail_pagesize'] = 50;
 $config['prefer_html'] = true;
+$config['max_message_size'] = '50M';
