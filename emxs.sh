@@ -151,6 +151,13 @@ cmd_reset_admin() {
     show_banner
     USER_NAME="${1:-admin}"
     echo -e "${C_YELLOW}Reset kata sandi administrator: $USER_NAME${C_RESET}"
+
+    # Validate username — only alphanumeric, dot, hyphen, underscore (prevent injection)
+    if ! echo "$USER_NAME" | grep -qE '^[a-zA-Z0-9._-]+$'; then
+        echo -e "${C_RED}Error: Username tidak valid. Hanya huruf, angka, titik, hubung, dan garis bawah.${C_RESET}"
+        exit 1
+    fi
+
     read -rsp "Masukkan kata sandi baru: " NEW_PASS
     echo ""
     if [ -z "$NEW_PASS" ]; then
@@ -158,22 +165,34 @@ cmd_reset_admin() {
         exit 1
     fi
 
-    # Hash via python bcrypt
-    python3 - << PYEOF
-import bcrypt
-import subprocess
-
-pass_raw = """$NEW_PASS""".encode('utf-8')
+    # Hash password via Python stdin (no heredoc variable interpolation — safe from injection)
+    HASHED=$(printf '%s' "$NEW_PASS" | python3 -c "
+import bcrypt, sys
+pass_raw = sys.stdin.buffer.read()
 salt = bcrypt.gensalt(10)
-hashed = bcrypt.hashpw(pass_raw, salt).decode('utf-8')
+print(bcrypt.hashpw(pass_raw, salt).decode('utf-8'))
+")
 
-cmd = ["su", "-", "postgres", "-c", f"psql -d mailserver -c \"UPDATE dashboard_users SET password_hash = '{hashed}', otp_enabled = FALSE WHERE username = '$USER_NAME';\""]
-res = subprocess.run(cmd, capture_output=True, text=True)
-if res.returncode == 0:
-    print("\033[1;32m✔ Kata sandi berhasil diperbarui dan 2FA dinonaktifkan!\033[0m")
-else:
-    print("\033[1;31m✖ Gagal memperbarui kata sandi:\033[0m", res.stderr)
-PYEOF
+    if [ -z "$HASHED" ]; then
+        echo -e "${C_RED}Gagal menghash password!${C_RESET}"
+        exit 1
+    fi
+
+    # Write SQL to a temp file using PostgreSQL dollar-quoting — safe against SQL injection
+    TMP_SQL=$(mktemp /tmp/emxs_XXXXXX.sql)
+    chmod 600 "$TMP_SQL"
+    printf "UPDATE dashboard_users\nSET password_hash = \$emxs\$%s\$emxs\$, otp_enabled = FALSE\nWHERE username = \$emxs\$%s\$emxs\$;\n" "$HASHED" "$USER_NAME" > "$TMP_SQL"
+
+    su - postgres -c "psql -d mailserver -f '$TMP_SQL'" 2>&1
+    RET=$?
+    rm -f "$TMP_SQL"
+
+    if [ "$RET" -eq 0 ]; then
+        echo -e "${C_GREEN}✔ Kata sandi berhasil diperbarui dan 2FA dinonaktifkan!${C_RESET}"
+    else
+        echo -e "${C_RED}✖ Gagal memperbarui kata sandi.${C_RESET}"
+        exit 1
+    fi
 }
 
 cmd_info() {

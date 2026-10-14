@@ -32,6 +32,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"sync"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,24 @@ import (
 )
 
 var db *sql.DB
+
+// loginAttemptInfo tracks failed login attempts for rate limiting
+type loginAttemptInfo struct {
+	mu    sync.Mutex
+	times []time.Time
+}
+
+// pendingOTPEntry holds verified credentials between password check and OTP step
+type pendingOTPEntry struct {
+	userID    int
+	otpSecret string
+	expiresAt time.Time
+}
+
+var (
+	loginAttempts sync.Map // key: IP string, value: *loginAttemptInfo
+	pendingOTPMap sync.Map // key: nonce string, value: pendingOTPEntry
+)
 
 type DashboardUser struct {
 	ID           int        `json:"id"`
@@ -189,9 +208,9 @@ type ArchiveFileInfo struct {
 
 var (
 	startTime        = time.Now()
-	configuredHost   = "mail.elsw-studio.my.id"
-	configuredDomain = "elsw-studio.my.id"
-	configuredIP     = "103.147.157.37"
+	configuredHost   = "localhost"
+	configuredDomain = "example.com"
+	configuredIP     = "127.0.0.1"
 )
 
 func main() {
@@ -209,7 +228,7 @@ func main() {
 
 	connStr := os.Getenv("EMXS_DB_CONN")
 	if connStr == "" {
-		connStr = "host=localhost port=5432 user=mailuser password=MailSec_P0stgre_2026!k9 dbname=mailserver sslmode=disable"
+		log.Fatal("FATAL: EMXS_DB_CONN environment variable is not set. Please configure /etc/emxs/emxs.env before starting.")
 	}
 
 	var err error
@@ -424,7 +443,13 @@ func main() {
 
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		// Only allow same-host origins — no wildcard for authenticated APIs
+		origin := r.Header.Get("Origin")
+		host := r.Host
+		if origin != "" && (strings.HasPrefix(origin, "https://"+host) || strings.HasPrefix(origin, "http://"+host)) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		if r.Method == "OPTIONS" {
@@ -998,6 +1023,15 @@ func handleQueueDelete(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		id = "ALL"
 	}
+	// Validate queue ID: must be alphanumeric or "ALL"
+	if id != "ALL" {
+		for _, c := range id {
+			if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+				jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "Invalid queue ID format"})
+				return
+			}
+		}
+	}
 	err := exec.Command("postsuper", "-d", id).Run()
 	if err != nil {
 		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -1011,7 +1045,11 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	if linesCount == "" {
 		linesCount = "100"
 	}
-	out, err := execTimeout(3*time.Second, "journalctl", "-u", "postfix", "-u", "dovecot", "-u", "rspamd", "-n", linesCount, "--no-pager")
+	// Cap maximum lines to prevent DoS via oversized output
+	if n, err := strconv.Atoi(linesCount); err != nil || n > 2000 {
+		linesCount = "2000"
+	}
+	out, err := execTimeout(5*time.Second, "journalctl", "-u", "postfix", "-u", "dovecot", "-u", "rspamd", "-n", linesCount, "--no-pager")
 	if err != nil {
 		jsonResponse(w, http.StatusOK, map[string]string{"logs": "Unable to fetch logs at this moment: " + err.Error()})
 		return
@@ -1981,16 +2019,74 @@ func initDashboardDB() error {
 	return nil
 }
 
+// extractClientIP safely extracts the client IP, sanitizing X-Forwarded-For
+func extractClientIP(r *http.Request) string {
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		// Take leftmost IP (original client) and validate it's a real IP
+		parts := strings.Split(fwd, ",")
+		candidate := strings.TrimSpace(parts[0])
+		if net.ParseIP(candidate) != nil {
+			return candidate
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// checkLoginRateLimit allows max 10 login attempts per IP per minute
+func checkLoginRateLimit(ip string) bool {
+	val, _ := loginAttempts.LoadOrStore(ip, &loginAttemptInfo{})
+	info := val.(*loginAttemptInfo)
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-1 * time.Minute)
+	var valid []time.Time
+	for _, t := range info.times {
+		if t.After(cutoff) {
+			valid = append(valid, t)
+		}
+	}
+	info.times = valid
+	if len(info.times) >= 10 {
+		return false
+	}
+	info.times = append(info.times, now)
+	return true
+}
+
+// generateNonce creates a cryptographically random single-use token
+func generateNonce() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	// Brute-force protection: max 10 attempts/IP/minute
+	clientIP := extractClientIP(r)
+	if !checkLoginRateLimit(clientIP) {
+		jsonResponse(w, http.StatusTooManyRequests, map[string]string{
+			"error": "Terlalu banyak percobaan login. Coba lagi dalam beberapa menit.",
+		})
+		return
+	}
+
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		OTPCode  string `json:"otp_code"`
+		Username     string `json:"username"`
+		Password     string `json:"password"`
+		OTPCode      string `json:"otp_code"`
+		PendingNonce string `json:"pending_nonce"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "Format data tidak valid"})
@@ -2000,7 +2096,57 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	req.Username = strings.TrimSpace(req.Username)
 	req.Password = strings.TrimSpace(req.Password)
 	req.OTPCode = strings.TrimSpace(req.OTPCode)
+	req.PendingNonce = strings.TrimSpace(req.PendingNonce)
 
+	// --- Nonce-based OTP verification (password NOT re-transmitted) ---
+	if req.PendingNonce != "" && req.OTPCode != "" {
+		val, ok := pendingOTPMap.Load(req.PendingNonce)
+		if !ok {
+			jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "Sesi OTP tidak valid atau sudah kadaluarsa."})
+			return
+		}
+		entry := val.(pendingOTPEntry)
+		pendingOTPMap.Delete(req.PendingNonce) // single-use nonce
+		if time.Now().After(entry.expiresAt) {
+			jsonResponse(w, http.StatusUnauthorized, map[string]string{"error": "Sesi OTP sudah kadaluarsa. Silakan login ulang."})
+			return
+		}
+		if !validateTOTP(entry.otpSecret, req.OTPCode) {
+			jsonResponse(w, http.StatusUnauthorized, map[string]string{
+				"error": "Kode OTP tidak valid atau telah kadaluarsa. Pastikan jam perangkat Anda akurat.",
+			})
+			return
+		}
+		var u DashboardUser
+		if dbErr := db.QueryRow(
+			`SELECT id, username, email, role, otp_enabled, created_at, updated_at FROM dashboard_users WHERE id = $1`,
+			entry.userID,
+		).Scan(&u.ID, &u.Username, &u.Email, &u.Role, &u.OTPEnabled, &u.CreatedAt, &u.UpdatedAt); dbErr != nil {
+			jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "Gagal mengambil data pengguna."})
+			return
+		}
+		token, expiresAt, err := createSession(u.ID, clientIP, r.UserAgent())
+		if err != nil {
+			jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "Gagal membuat sesi login"})
+			return
+		}
+		db.Exec("UPDATE dashboard_users SET last_login = NOW() WHERE id = $1", u.ID)
+		http.SetCookie(w, &http.Cookie{
+			Name: "emxs_session", Value: token, Path: "/",
+			Expires: expiresAt, MaxAge: 86400,
+			HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
+		})
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"user": map[string]interface{}{
+				"id": u.ID, "username": u.Username, "email": u.Email,
+				"role": u.Role, "otp_enabled": u.OTPEnabled,
+			},
+		})
+		return
+	}
+
+	// --- Standard username+password login ---
 	if req.Username == "" || req.Password == "" {
 		jsonResponse(w, http.StatusBadRequest, map[string]string{"error": "Username dan kata sandi wajib diisi"})
 		return
@@ -2032,32 +2178,28 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If OTP is enabled for this user:
+	// OTP enabled: issue a short-lived nonce — client never re-sends password
 	if u.OTPEnabled {
-		if req.OTPCode == "" {
-			jsonResponse(w, http.StatusOK, map[string]interface{}{
-				"otp_required": true,
-				"message":      "Akun ini mengaktifkan Autentikasi Dua Langkah. Masukkan 6 digit kode OTP.",
-			})
+		nonce, nonceErr := generateNonce()
+		if nonceErr != nil {
+			jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "Gagal membuat sesi OTP"})
 			return
 		}
-
-		if !validateTOTP(u.OTPSecret, req.OTPCode) {
-			jsonResponse(w, http.StatusUnauthorized, map[string]string{
-				"error": "Kode OTP tidak valid atau telah kadaluarsa. Pastikan jam perangkat Anda akurat.",
-			})
-			return
-		}
+		pendingOTPMap.Store(nonce, pendingOTPEntry{
+			userID:    u.ID,
+			otpSecret: u.OTPSecret,
+			expiresAt: time.Now().Add(5 * time.Minute),
+		})
+		jsonResponse(w, http.StatusOK, map[string]interface{}{
+			"otp_required":  true,
+			"pending_nonce": nonce,
+			"message":       "Akun ini mengaktifkan Autentikasi Dua Langkah. Masukkan 6 digit kode OTP.",
+		})
+		return
 	}
 
 	// Login successful: create session
-	ip := r.RemoteAddr
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		ip = fwd
-	}
-	userAgent := r.UserAgent()
-
-	token, expiresAt, err := createSession(u.ID, ip, userAgent)
+	token, expiresAt, err := createSession(u.ID, clientIP, r.UserAgent())
 	if err != nil {
 		jsonResponse(w, http.StatusInternalServerError, map[string]string{"error": "Gagal membuat sesi login"})
 		return
@@ -2787,7 +2929,7 @@ func renderLoginPage(w http.ResponseWriter, r *http.Request) {
     </div>
 
     <script>
-        var cachedAuth = { username: '', password: '' };
+        var cachedAuth = { nonce: '' };
 
         function togglePasswordVisibility() {
             var pwd = document.getElementById('login-password');
@@ -2821,8 +2963,7 @@ func renderLoginPage(w http.ResponseWriter, r *http.Request) {
                 return;
             }
 
-            cachedAuth.username = u;
-            cachedAuth.password = p;
+            cachedAuth.nonce = ''; // will be set on otp_required
 
             var btn = document.getElementById('btn-submit-login');
             var label = document.getElementById('btn-login-label');
@@ -2851,6 +2992,7 @@ func renderLoginPage(w http.ResponseWriter, r *http.Request) {
                 }
 
                 if (result.data.otp_required) {
+                    cachedAuth.nonce = result.data.pending_nonce || '';
                     document.getElementById('form-login').style.display = 'none';
                     document.getElementById('form-otp').style.display = 'block';
                     var otpInp = document.getElementById('login-otp');
@@ -2894,8 +3036,7 @@ func renderLoginPage(w http.ResponseWriter, r *http.Request) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    username: cachedAuth.username,
-                    password: cachedAuth.password,
+                    pending_nonce: cachedAuth.nonce,
                     otp_code: code
                 })
             })

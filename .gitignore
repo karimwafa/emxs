@@ -1,0 +1,43 @@
+# ==============================================================================
+# EMXS Installer — .gitignore
+# ==============================================================================
+
+# Backup and temporary files
+*.bak
+*.bak_*
+*.tmp
+*.swp
+*.swo
+*~
+
+# Process output logs
+nohup.out
+*.log
+
+# Runtime secrets and environment
+*.env
+!*.env.example
+emxs-credentials.txt
+
+# SSL/TLS private keys
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Compiled Go binaries
+mail-api
+/src/mail-api/mail-api
+
+# Go test artifacts
+*.test
+*.out
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.idea/
+.vscode/
+*.iml
