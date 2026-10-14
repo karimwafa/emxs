@@ -519,7 +519,7 @@ cat << EOF > /etc/emxs/emxs.env
 EMXS_SERVER_HOST=$CONF_HOSTNAME
 EMXS_PRIMARY_DOMAIN=$CONF_DOMAIN
 EMXS_SERVER_IP=$CONF_IP
-EMXS_DB_CONN=host=localhost port=5432 user=mailuser password=$CONF_DB_PASS dbname=mailserver sslmode=prefer
+EMXS_DB_CONN=host=localhost port=5432 user=mailuser password=$CONF_DB_PASS dbname=mailserver sslmode=disable
 PORT=8080
 EMXS_SSL_CERT=$SSL_CERT
 EMXS_SSL_KEY=$SSL_KEY
