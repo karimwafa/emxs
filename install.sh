@@ -519,7 +519,7 @@ cat << EOF > /etc/emxs/emxs.env
 EMXS_SERVER_HOST=$CONF_HOSTNAME
 EMXS_PRIMARY_DOMAIN=$CONF_DOMAIN
 EMXS_SERVER_IP=$CONF_IP
-EMXS_DB_CONN=host=localhost port=5432 user=mailuser password=$CONF_DB_PASS dbname=mailserver sslmode=disable
+EMXS_DB_CONN=host=localhost port=5432 user=mailuser password=$CONF_DB_PASS dbname=mailserver sslmode=prefer
 PORT=8080
 EMXS_SSL_CERT=$SSL_CERT
 EMXS_SSL_KEY=$SSL_KEY
@@ -561,12 +561,18 @@ echo "--> Memulai seluruh layanan mail stack..."
 systemctl enable "$REDIS_SERVICE" rspamd dovecot postfix "$PHP_FPM_SERVICE" nginx mail-api 2>/dev/null || true
 systemctl restart "$REDIS_SERVICE" postgresql rspamd dovecot postfix "$PHP_FPM_SERVICE" nginx mail-api
 
-# Generate credentials receipt
+# Generate credentials receipt — chmod 600 (root-only readable)
 RECEIPT_FILE="/root/emxs-credentials.txt"
 cat << EOF > "$RECEIPT_FILE"
 ==============================================================================
            EMXS EMAIL EXCHANGER STUDIO — BUKTI INSTALASI & KREDENSIAL         
 ==============================================================================
+!!! PERINGATAN KEAMANAN !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+File ini berisi kata sandi dalam TEKS BIASA (plaintext).
+Salin informasi di bawah ke tempat yang aman (password manager),
+kemudian HAPUS file ini dengan perintah:
+  shred -u /root/emxs-credentials.txt
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 Tanggal Instalasi : $(date)
 Sistem Operasi    : $OS_PRETTY ($OS_FAMILY)
 Server Hostname   : $CONF_HOSTNAME
@@ -628,6 +634,9 @@ PERINTAH MANAJEMEN:
 ==============================================================================
 EOF
 
+# Restrict access: hanya root yang bisa membaca file ini
+chmod 600 "$RECEIPT_FILE"
+
 echo ""
 echo -e "${C_GREEN}${C_BOLD}"
 echo "=============================================================================="
@@ -639,6 +648,8 @@ echo -e "Akses Webmail   : ${C_CYAN}https://$CONF_HOSTNAME/webmail/${C_RESET}"
 echo -e "Username        : ${C_BOLD}$CONF_ADMIN_USER${C_RESET}"
 echo -e "Password        : ${C_YELLOW}$CONF_ADMIN_PASS${C_RESET}"
 echo ""
-echo -e "Bukti instalasi & kredensial lengkap tersimpan di: ${C_BOLD}$RECEIPT_FILE${C_RESET}"
+echo -e "Bukti instalasi & kredensial tersimpan di: ${C_BOLD}$RECEIPT_FILE${C_RESET} (chmod 600)"
+echo -e "${C_RED}${C_BOLD}⚠  PERINGATAN KEAMANAN: File tersebut berisi password plaintext!${C_RESET}"
+echo -e "   Setelah menyalin ke password manager, jalankan:${C_BOLD} shred -u $RECEIPT_FILE${C_RESET}"
 echo -e "Gunakan perintah ${C_GREEN}emxs status${C_RESET} untuk memeriksa kesehatan server kapan saja."
 echo "=============================================================================="
