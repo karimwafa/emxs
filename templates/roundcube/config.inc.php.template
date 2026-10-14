@@ -1,0 +1,33 @@
+<?php
+$config = [];
+
+// Database DSN
+$config['db_dsnw'] = 'pgsql://roundcube:{{RC_DB_PASSWORD}}@localhost/roundcubemail';
+
+// Connect to local Dovecot IMAP
+$config['default_host'] = 'localhost';
+$config['default_port'] = 143;
+$config['imap_auth_type'] = 'LOGIN';
+
+// Connect to local Postfix SMTP via Port 587 with STARTTLS
+$config['smtp_host'] = 'tls://127.0.0.1:587';
+$config['smtp_user'] = '%u';
+$config['smtp_pass'] = '%p';
+$config['smtp_auth_type'] = 'LOGIN';
+$config['smtp_conn_options'] = [
+    'ssl' => [
+        'verify_peer' => false,
+        'verify_peer_name' => false,
+        'allow_self_signed' => true,
+    ],
+];
+
+// General Branding & Security
+$config['product_name'] = 'EMXS Email Exchanger Studio';
+$config['support_url'] = '';
+$config['des_key'] = '{{DES_KEY}}';
+$config['plugins'] = ['archive', 'zipdownload', 'managesieve'];
+$config['skin'] = 'elastic';
+$config['auto_create_user'] = true;
+$config['mail_pagesize'] = 50;
+$config['prefer_html'] = true;

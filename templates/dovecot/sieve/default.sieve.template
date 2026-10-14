@@ -1,0 +1,7 @@
+require ["fileinto", "mailbox"];
+
+# Automatically move messages tagged by Rspamd as spam into Junk folder
+if header :contains "X-Spam" "Yes" {
+    fileinto :create "Junk";
+    stop;
+}

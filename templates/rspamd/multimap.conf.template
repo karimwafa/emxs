@@ -1,0 +1,34 @@
+FILENAME_BLACKLISTED {
+  type = "filename";
+  filter = "extension";
+  map = "${CONFDIR}/maps.d/bad_extensions.map";
+  symbol = "BAD_EXTENSION";
+  score = 15.0;
+  description = "Dangerous executable or script attachment detected";
+}
+
+SENDER_BLACKLIST {
+  type = "from";
+  map = "${CONFDIR}/maps.d/blacklist_senders.map";
+  symbol = "SENDER_BLACKLIST";
+  score = 20.0;
+  description = "Sender email or domain is blacklisted";
+}
+
+SENDER_WHITELIST {
+  type = "from";
+  map = "${CONFDIR}/maps.d/whitelist_senders.map";
+  symbol = "SENDER_WHITELIST";
+  score = -20.0;
+  description = "Sender email or domain is whitelisted";
+}
+
+SUBJECT_BLACKLIST {
+  type = "header";
+  header = "Subject";
+  map = "${CONFDIR}/maps.d/bad_subjects.map";
+  regexp = true;
+  symbol = "BAD_SUBJECT";
+  score = 10.0;
+  description = "Subject contains blacklisted keywords";
+}

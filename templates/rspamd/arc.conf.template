@@ -1,0 +1,6 @@
+allow_envfrom_empty = true;
+auth_only = true;
+sign_authenticated = true;
+use_domain = "header";
+path = "/var/lib/rspamd/dkim/$domain.$selector.key";
+selector = "mail";

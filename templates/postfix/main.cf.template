@@ -1,0 +1,63 @@
+# EMXS Postfix main.cf Template
+smtpd_banner = $myhostname ESMTP EMXS
+biff = no
+append_dot_mydomain = no
+readme_directory = no
+compatibility_level = 3.6
+
+# TLS parameters
+smtpd_tls_cert_file = {{SSL_CERT}}
+smtpd_tls_key_file = {{SSL_KEY}}
+smtpd_tls_security_level = may
+smtpd_tls_auth_only = yes
+smtpd_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+smtpd_tls_mandatory_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+
+smtp_tls_CApath = /etc/ssl/certs
+smtp_tls_security_level = dane
+smtp_tls_session_cache_database = btree:${data_directory}/smtp_scache
+
+# Host & Domains
+myhostname = {{SERVER_HOSTNAME}}
+myorigin = /etc/mailname
+mydestination = localhost.$mydomain, localhost
+relayhost = 
+mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
+mailbox_size_limit = 0
+recipient_delimiter = +
+inet_interfaces = all
+inet_protocols = all
+
+# Virtual domains & Mailboxes
+virtual_transport = lmtp:unix:private/dovecot-lmtp
+virtual_mailbox_domains = pgsql:/etc/postfix/pgsql/virtual_mailbox_domains.cf
+virtual_mailbox_maps = pgsql:/etc/postfix/pgsql/virtual_mailbox_maps.cf
+virtual_alias_maps = pgsql:/etc/postfix/pgsql/virtual_alias_maps.cf
+
+# SASL Auth via Dovecot
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+smtpd_sasl_auth_enable = yes
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_local_domain = $myhostname
+
+# Restrictions
+smtpd_helo_required = yes
+smtpd_recipient_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    reject_unauth_destination,
+    reject_non_fqdn_recipient,
+    reject_unknown_recipient_domain
+
+smtpd_relay_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    defer_unauth_destination
+
+# Milters (Rspamd)
+milter_default_action = accept
+milter_protocol = 6
+smtpd_milters = inet:127.0.0.1:11332
+non_smtpd_milters = inet:127.0.0.1:11332
+milter_mail_macros = i {mail_addr} {client_addr} {client_name} {auth_authen}

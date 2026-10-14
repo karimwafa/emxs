@@ -1,0 +1,31 @@
+server {
+    listen 127.0.0.1:8088;
+    server_name localhost;
+    root /var/www/roundcube/public_html;
+    index index.php index.html;
+
+    client_max_body_size 50M;
+
+    # Route static.php with PATH_INFO for Roundcube Elastic skin
+    location ~ ^/(webmail/)?static\.php(/.*)?$ {
+        include fastcgi_params;
+        fastcgi_split_path_info ^(.+?static\.php)(/.*)$;
+        fastcgi_param SCRIPT_FILENAME /var/www/roundcube/public_html/static.php;
+        fastcgi_param PATH_INFO $fastcgi_path_info;
+        fastcgi_pass unix:{{PHP_FPM_SOCK}};
+    }
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_pass unix:{{PHP_FPM_SOCK}};
+        fastcgi_param SCRIPT_FILENAME $request_filename;
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+}

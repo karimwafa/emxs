@@ -1,0 +1,3 @@
+# Blacklisted senders or domains (one per line)
+# example@spamdomain.com
+# @spammer.org

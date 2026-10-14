@@ -1,0 +1,6 @@
+driver = pgsql
+connect = host=localhost dbname=mailserver user=mailuser password={{DB_PASSWORD}}
+default_pass_scheme = BLF-CRYPT
+password_query = SELECT email as user, password FROM accounts WHERE email = '%u' AND is_active = true
+user_query = SELECT '/var/mail/vhosts/' || '%d' || '/' || '%n' as home, 'maildir:/var/mail/vhosts/' || '%d' || '/' || '%n' as mail, 5000 as uid, 5000 as gid, concat('*:bytes=', quota_bytes) as quota_rule FROM accounts WHERE email = '%u' AND is_active = true
+iterate_query = SELECT email AS user FROM accounts WHERE is_active = true

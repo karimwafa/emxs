@@ -1,0 +1,9 @@
+protocol lmtp {
+  mail_plugins = $mail_plugins sieve
+}
+
+plugin {
+  sieve = ~/sieve/roundcube.sieve
+  sieve_default = /etc/dovecot/sieve/default.sieve
+  sieve_dir = ~/sieve
+}

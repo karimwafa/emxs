@@ -1,0 +1,15 @@
+[Unit]
+Description=EMXS Email Exchanger Studio Management API & Web Dashboard
+After=network.target postgresql.service postfix.service dovecot.service redis.service redis-server.service rspamd.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/emxs
+EnvironmentFile=-/etc/emxs/emxs.env
+ExecStart=/usr/local/bin/mail-api
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

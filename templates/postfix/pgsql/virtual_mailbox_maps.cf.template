@@ -1,0 +1,5 @@
+hosts = localhost
+user = mailuser
+password = {{DB_PASSWORD}}
+dbname = mailserver
+query = SELECT 1 FROM accounts WHERE email='%s' AND is_active = true

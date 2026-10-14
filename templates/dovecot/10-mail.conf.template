@@ -1,0 +1,32 @@
+mail_location = maildir:/var/mail/vhosts/%d/%n
+mail_uid = 5000
+mail_gid = 5000
+first_valid_uid = 5000
+last_valid_uid = 5000
+mail_privileged_group = mail
+namespace inbox {
+  inbox = yes
+  mailbox Trash {
+    auto = subscribe
+    special_use = \Trash
+  }
+  mailbox Drafts {
+    auto = subscribe
+    special_use = \Drafts
+  }
+  mailbox Sent {
+    auto = subscribe
+    special_use = \Sent
+  }
+  mailbox "Sent Messages" {
+    special_use = \Sent
+  }
+  mailbox Junk {
+    auto = subscribe
+    special_use = \Junk
+  }
+  mailbox Archive {
+    auto = subscribe
+    special_use = \Archive
+  }
+}
