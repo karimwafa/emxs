@@ -2924,7 +2924,7 @@ func renderLoginPage(w http.ResponseWriter, r *http.Request) {
         </form>
 
         <div class="footer-note">
-            EMXS Enterprise Edition &bull; TLS 1.3 &bull; Postfix / Dovecot Engine
+            EMXS Enterprise Edition &bull; TLS 1.3
         </div>
     </div>
 
